@@ -2,6 +2,7 @@
 
 import logging
 import telebot
+import threading
 import os
 import openai
 import json
@@ -28,6 +29,9 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL")
 VOICE_MODEL = os.getenv("VOICE_MODEL")
 OPENAI_VOICE = os.getenv("OPENAI_VOICE")
 
+# Variable for typing functions 
+is_typing = False
+
 logger = telebot.logger
 telebot.logger.setLevel(logging.INFO)
 
@@ -35,24 +39,39 @@ telebot.logger.setLevel(logging.INFO)
 bot = telebot.TeleBot(TG_BOT_TOKEN, threaded=False)
 
 # Redirect requests to OpenAI via ProxyAI 
-client = openai.Client (
-    api_key = PROXY_API_KEY,
-    base_url="https://api.proxyapi.ru/openai/v1",)
+client = openai.Client(
+    api_key=PROXY_API_KEY,
+    base_url="https://api.proxyapi.ru/openai/v1",
+)
 
 # Function to safe message logs to the Yandex Object Storage
 def get_s3_client():
     session = boto3.session.Session (
-        aws_access_key_id=YANDEX_KEY_ID, aws_secret_access_key=YANDEX_KEY_SECRET)
+        aws_access_key_id=YANDEX_KEY_ID, aws_secret_access_key=YANDEX_KEY_SECRET
+    )
     return session.client (
-        service_name="s3", endpoint_url="https://storage.yandexcloud.net")
+        service_name="s3", endpoint_url="https://storage.yandexcloud.net"
+    )
 
 # Function to show "Typing" message while waiting tha ChatGPT answer
+
+def start_typing(chat_id):
+    global is_typing
+    is_typing = True
+    typing_thread = threading.Thread(target = typing, args = (chat_id,))
+    typing_thread.start()
+
 def typing(chat_id):
-    while True:
+    global is_typing
+    while is_typing:
         # For some unknown reason this action does not work
         # bot.send_chat_action(chat_id=chat_id, action=telebot.ChatAction.TYPING)
         bot.send_chat_action(chat_id, "typing")
-        time.sleep(5)
+        time.sleep(4)
+
+def stop_typing():
+    global is_typing
+    is_typing = False
 
 # Welcome and help messages
 @bot.message_handler(commands=['start'])
@@ -91,6 +110,9 @@ def request_balance(message):
 # Image generator
 @bot.message_handler(commands=["image"])
 def image(message):
+
+    start_typing(message.chat.id)
+
     prompt = message.text.split("/image")[1].strip()
     if len(prompt) == 0:
         bot.reply_to(message, "Введите запрос после команды /image")
@@ -101,8 +123,10 @@ def image(message):
             prompt=prompt, n=1, size="1024x1024", model=OPENAI_MODEL
         )
     except:
-        bot.reply_to(message, "Произошла ошибка, попробуйте позже!")
+        bot.reply_to(message, "Произошла ошибка в генерации изображения, попробуйте позже!")
         return
+
+    stop_typing()
 
     bot.send_photo(
         message.chat.id,
@@ -111,13 +135,30 @@ def image(message):
     )
 
 # Voice recognition
- 
-        
+@bot.message_handler(commands=["recognition"])
+def recognition(message):
+
+    start_typing(message.chat.id)
+
+    # Check if audio file exists in message.
+    if message.audio:
+        audio_info = bot.get_file(message.audio.file_id)
+        # audio_file_id = message.audio.file_id
+        audio_info = message.audio
+        title = audio_info.title if audio_info.title else "Без названия"
+        performer = audio_info.performer if audio_info.performer else "Без исполнителя"
+        bot.reply_to(message, f"Получен аудиофайл: {title} от исполнителя {performer}")
+    else:
+        bot.reply_to(message, "Пожалуйста, приложите аудиофайл к команде /recognition.")
+
+    stop_typing()
+
 # Voice request and voice answer
-@bot.message_handler(
-    func=lambda msg: msg.voice.mime_type == "audio/ogg", content_types=["voice"]
-)
+@bot.message_handler(func=lambda msg: msg.voice.mime_type == "audio/ogg", content_types=["voice"])
 def voice(message):
+
+    start_typing(message.chat.id)
+
     file_info = bot.get_file(message.voice.file_id)
     downloaded_file = bot.download_file(file_info.file_path)
 
@@ -136,8 +177,10 @@ def voice(message):
         with open("/tmp/ai_voice_response.ogg", "wb") as f:
             f.write(ai_voice_response.content)
     except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка, попробуйте позже! {e}")
+        bot.reply_to(message, f"Произошла ошибка в генерации голосового ответа, попробуйте позже! {e}")
         return
+
+    stop_typing()
 
     with open("/tmp/ai_voice_response.ogg", "rb") as f:
         bot.send_voice(
@@ -150,8 +193,7 @@ def voice(message):
 @bot.message_handler(func=lambda message: True, content_types=["text", "photo"])
 def echo_message(message):
     
-    typing_process = multiprocessing.Process(target=typing, args=(message.chat.id,))
-    typing_process.start()
+    start_typing(message.chat.id)
 
     try:
         text = message.text
@@ -164,17 +206,21 @@ def echo_message(message):
             image_content = bot.download_file(file_info.file_path)
             text = message.caption
             if text is None or len(text) == 0:
-                text = "Что на картинке?"
+                text = "Что изображено на картинке?"
 
         ai_response = process_text_message(text, message.chat.id, image_content)
+
     except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка, попробуйте позже! {e}")
+        bot.reply_to(message, f"Произошла ошибка в распознавании картинки, попробуйте позже! {e}")
         return
 
-    typing_process.terminate()
+    stop_typing()
+
     bot.reply_to(message, ai_response, parse_mode="markdown")
 
+# Message processing function
 def process_text_message(text, chat_id, image_content=None) -> str:
+    
     model = CHATGPT_MODEL
     max_tokens = None
 
@@ -187,7 +233,7 @@ def process_text_message(text, chat_id, image_content=None) -> str:
         )
         history = json.loads(history_object_response["Body"].read())
     except:
-        logging.error(f"Failed to clear history for chat_id {chat_id}: {e}")
+        pass
 
     history_text_only = history.copy()
     history_text_only.append({"role": "user", "content": text})
@@ -214,7 +260,7 @@ def process_text_message(text, chat_id, image_content=None) -> str:
             model=model, messages=history, max_tokens=max_tokens
         )
     except Exception as e:
-        if type(e).__name__ == "InvalidRequestError":
+        if type(e).__name__ == "BadRequestError":
             clear_history_for_chat(chat_id)
             return process_text_message(text, chat_id)
         else:
@@ -223,15 +269,16 @@ def process_text_message(text, chat_id, image_content=None) -> str:
     ai_response = chat_completion.choices[0].message.content
     history_text_only.append({"role": "assistant", "content": ai_response})
 
-    # Save current chat history
+    # save current chat history
     s3client.put_object(
         Bucket=YANDEX_BUCKET,
         Key=f"{chat_id}.json",
-        Body=json.dumps(history),
+        Body=json.dumps(history_text_only),
     )
 
     return ai_response
 
+# Clear message history function
 def clear_history_for_chat(chat_id):
     try:
         s3client = get_s3_client()

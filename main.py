@@ -135,23 +135,29 @@ def image(message):
     )
 
 # Voice recognition
-@bot.message_handler(commands=["recognition"])
-def recognition(message):
+@bot.message_handler(commands=["recognition"], content_types=["document", "audio"])
+def recognition(message):   
 
-    start_typing(message.chat.id)
+    typing(message.chat.id)
 
-    # Check if audio file exists in message.
-    if message.audio:
-        audio_info = bot.get_file(message.audio.file_id)
-        # audio_file_id = message.audio.file_id
-        audio_info = message.audio
-        title = audio_info.title if audio_info.title else "Без названия"
-        performer = audio_info.performer if audio_info.performer else "Без исполнителя"
-        bot.reply_to(message, f"Получен аудиофайл: {title} от исполнителя {performer}")
-    else:
-        bot.reply_to(message, "Пожалуйста, приложите аудиофайл к команде /recognition.")
+    try:
+        # Check if audio file exists in message.
+        if message.audio:
+            audio_info = bot.get_file(message.audio.file_id)
+            # audio_file_id = message.audio.file_id
+            audio_info = message.audio
+            title = audio_info.title if audio_info.title else "Без названия"
+            performer = audio_info.performer if audio_info.performer else "Без исполнителя"
+        else:
+            bot.reply_to(message, "Пожалуйста, приложите аудиофайл к команде /recognition.")
 
-    stop_typing()
+        stop_typing()
+
+        bot.reply_to(message, f"Получен аудиофайл: {title} от исполнителя {performer}") 
+    
+    except Exception as e:
+        bot.reply_to(message, f"Произошла ошибка в распозновании голоса, попробуйте позже! {e}")
+        return
 
 # Voice request and voice answer
 @bot.message_handler(func=lambda msg: msg.voice.mime_type == "audio/ogg", content_types=["voice"])

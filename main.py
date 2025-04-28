@@ -1,4 +1,4 @@
-#  Copyright (c) S.Chirva 2024
+#  Copyright (c) S.Chirva 2025
 
 import logging
 import telebot
@@ -8,10 +8,11 @@ import openai
 import json
 import boto3
 import time
-import multiprocessing
+# import multiprocessing
 import requests
 import base64
 from telebot.types import InputFile
+import itertools
 
 # Import enviroment variables
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
@@ -23,6 +24,7 @@ YANDEX_BUCKET = os.getenv("YANDEX_BUCKET")
 # Google models: gemini-1.0-pro, gemini-1.5-pro, gemini-1.5-pro, gemini-1.5-flash, gemini-1.5-flash
 # Anthropic: claude-3-opus-20240229, claude-3-sonnet-20240229, claude-3-sonnet-20240229, claude-3-5-sonnet-20240620
 CHATGPT_MODEL = os.getenv("CHATGPT_MODEL")
+CHATGPT_SEARCH_MODEL = os.getenv("CHATGPT_SEARCH_MODEL")
 # OpenAI models: DALL-E 2, DALL-E 3, DALL-E 3 HD
 OPENAI_MODEL = os.getenv("OPENAI_MODEL")
 # OpenAI voice models (tts-1, tts-1-hd) and voice (alloy, echo, fable, onyx, nova и shimmer)
@@ -134,33 +136,50 @@ def image(message):
         reply_to_message_id=message.message_id,
     )
 
-# Voice recognition
-@bot.message_handler(commands=["recognition"], content_types=["document", "audio"])
-def recognition(message):   
+# Audio voice recognition
+@bot.message_handler(commands=["recognition"])
+def recognition(message):
 
-    typing(message.chat.id)
+    start_typing(message.chat.id)
 
-    try:
-        # Check if audio file exists in message.
-        if message.audio:
-            audio_info = bot.get_file(message.audio.file_id)
-            # audio_file_id = message.audio.file_id
-            audio_info = message.audio
-            title = audio_info.title if audio_info.title else "Без названия"
-            performer = audio_info.performer if audio_info.performer else "Без исполнителя"
-        else:
-            bot.reply_to(message, "Пожалуйста, приложите аудиофайл к команде /recognition.")
+    # Check if audifile attached
+    if message.document and message.document.mime_type in ["audio/mpeg", "audio/wav"]:
+        # Getting file info
+        audio_file_info = bot.get_file(message.document.file_id)
+        downloaded_file = bot.download_file(audio_file_info.file_path)
+
+        bot.reply_to(message, "Аудиофайл получен")
+
+        # Getting title and performer of the file
+        title = message.document.title if hasattr(message.document, 'title') else "Без названия"
+        performer = message.document.performer if hasattr(message.document, 'performer') else "Без исполнителя"
 
         stop_typing()
 
-        bot.reply_to(message, f"Получен аудиофайл: {title} от исполнителя {performer}") 
-    
+        # Sending audiofile info
+        bot.reply_to(message, f"Получен аудиофайл: {title} от исполнителя {performer}")
+    else:
+        bot.reply_to(message, "Пожалуйста, приложите аудиофайл к команде /recognition.")
+
+# Message handler for search function
+@bot.message_handler(commands=["search"])
+def process_search_message(message):
+
+    start_typing(message.chat.id)
+
+    try:
+        text = message.text
+        ai_response = process_text_message(text, message.chat.id, image_content = None, is_search = True)
+
     except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка в распозновании голоса, попробуйте позже! {e}")
+        bot.reply_to(message, f"Произошла ошибка поиска, попробуйте позже! {e}")
         return
+    stop_typing()
+
+    bot.reply_to(message, ai_response)
 
 # Voice request and voice answer
-@bot.message_handler(func=lambda msg: msg.voice.mime_type == "audio/ogg", content_types=["voice"])
+@bot.message_handler(func = lambda msg: msg.voice.mime_type == "audio/ogg", content_types=["voice"])
 def voice(message):
 
     start_typing(message.chat.id)
@@ -173,7 +192,7 @@ def voice(message):
             file=("file.ogg", downloaded_file, "audio/ogg"),
             model="whisper-1",
         )
-        ai_response = process_text_message(response.text, message.chat.id)
+        ai_response = process_text_message(response.text, message.chat.id, is_search = None)
         ai_voice_response = client.audio.speech.create(
             input=ai_response,
             voice=OPENAI_VOICE,
@@ -214,7 +233,7 @@ def echo_message(message):
             if text is None or len(text) == 0:
                 text = "Что изображено на картинке?"
 
-        ai_response = process_text_message(text, message.chat.id, image_content)
+        ai_response = process_text_message(text, message.chat.id, image_content, is_search = None)
 
     except Exception as e:
         bot.reply_to(message, f"Произошла ошибка в распознавании картинки, попробуйте позже! {e}")
@@ -222,28 +241,39 @@ def echo_message(message):
 
     stop_typing()
 
+    # for msg_batch in itertools.batched(ai_response, 4096):
+    #    bot.reply_to(message, msg_batch, parse_mode="markdown") 
+        
     bot.reply_to(message, ai_response, parse_mode="markdown")
 
 # Message processing function
-def process_text_message(text, chat_id, image_content=None) -> str:
+def process_text_message(text, chat_id, image_content = None, is_search = None) -> str:
     
-    model = CHATGPT_MODEL
-    max_tokens = None
+    # Condition to use ChatGPT search model
+    if is_search:
+        model = CHATGPT_SEARCH_MODEL
+    else: 
+        model = CHATGPT_MODEL
 
-    # read current chat history
+    max_tokens = None
+    web_search_options = None
+
+    # Read current chat history
     s3client = get_s3_client()
     history = []
+    
     try:
         history_object_response = s3client.get_object(
             Bucket=YANDEX_BUCKET, Key=f"{chat_id}.json"
         )
         history = json.loads(history_object_response["Body"].read())
     except:
-        pass
+        logging.error(f"Failed to add history log for chat_id {chat_id}: {e}")
 
     history_text_only = history.copy()
     history_text_only.append({"role": "user", "content": text})
 
+    # Image recognition response
     if image_content is not None:
         model = "gpt-4-vision-preview"
         max_tokens = 4000
@@ -259,16 +289,28 @@ def process_text_message(text, chat_id, image_content=None) -> str:
             }
         )
     else:
+        if is_search:
+            web_search_options = {
+            "search_context_size": "low",
+            "user_location": {
+                "type": "approximate",
+                "country": "RU",
+                "city": "Moscow",
+                "region": "Moscow"
+            }
+            }
+        
         history.append({"role": "user", "content": text})
 
     try:
         chat_completion = client.chat.completions.create(
-            model=model, messages=history, max_tokens=max_tokens
+            model=model, web_search_options = web_search_options, messages=history, max_tokens=max_tokens
         )
+
     except Exception as e:
         if type(e).__name__ == "BadRequestError":
             clear_history_for_chat(chat_id)
-            return process_text_message(text, chat_id)
+            return process_text_message(text, chat_id, is_search = None)
         else:
             raise e
 

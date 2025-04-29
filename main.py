@@ -76,13 +76,13 @@ def stop_typing():
     is_typing = False
 
 # Welcome and help messages
-@bot.message_handler(commands=['start'])
+@bot.message_handler(commands=["start"])
 def send_welcome(message):
     bot.reply_to(
         message,
         ("Привет! Я твой ChatGPT бот. Задай мне вопрос!"),)
 
-@bot.message_handler(commands=['help'])
+@bot.message_handler(commands=["help"])
 def send_welcome(message):
     bot.reply_to(
         message, 
@@ -168,7 +168,7 @@ def process_search_message(message):
     start_typing(message.chat.id)
 
     try:
-        text = message.text
+        text = message.text.split("/search")[1].strip()
         ai_response = process_text_message(text, message.chat.id, image_content = None, is_search = True)
 
     except Exception as e:
@@ -247,14 +247,17 @@ def echo_message(message):
     bot.reply_to(message, ai_response, parse_mode="markdown")
 
 # Message processing function
-def process_text_message(text, chat_id, image_content = None, is_search = None) -> str:
-    
-    # Condition to use ChatGPT search model
-    if is_search:
-        model = CHATGPT_SEARCH_MODEL
-    else: 
-        model = CHATGPT_MODEL
+def process_text_message(text, chat_id, image_content = None, is_search = False) -> str:
 
+    # if is_search is None:
+    #    is_search = False
+
+    logging.debug(f"is_search value: {is_search}")
+
+    # Condition to use ChatGPT search model
+    model = CHATGPT_SEARCH_MODEL if is_search else CHATGPT_MODEL
+    # model = CHATGPT_SEARCH_MODEL
+    
     max_tokens = None
     web_search_options = None
 
@@ -304,9 +307,11 @@ def process_text_message(text, chat_id, image_content = None, is_search = None) 
 
     try:
         chat_completion = client.chat.completions.create(
-            model=model, web_search_options = web_search_options, messages=history, max_tokens=max_tokens
+            model=model, web_search_options = web_search_options, messages = history, max_tokens = max_tokens
         )
-
+        
+        logging.debug(f"Chat completion: {chat_completion}")
+        
     except Exception as e:
         if type(e).__name__ == "BadRequestError":
             clear_history_for_chat(chat_id)

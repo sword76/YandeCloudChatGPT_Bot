@@ -14,6 +14,7 @@ from telebot.types import InputFile
 
 # Temp. For sound file mathadata exctruction
 import mutagen
+import tempfile
 
 # For 4096 characters long answer message splitting 
 import itertools
@@ -164,7 +165,7 @@ def image(message):
 @bot.message_handler(commands=["recognition"])
 def recognition(message):
 
-    msg = bot.send_message(message.chat.id, "Отправь аудиофайл (mp3 или wav) для обработки.")
+    msg = bot.send_message(message.chat.id, "Отправь аудиофайл (mp3 или ogg) для обработки.")
 
     start_typing(message.chat.id)
 
@@ -184,7 +185,8 @@ def process_audio(message):
     
     # Download file to tmp folder
     file_info = bot.get_file(audio_file.file_id)
-    downloaded_file = bot.download_file(file_info.file_path)
+    file_path = file_info.file_path
+    downloaded_file = bot.download_file(file_path)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_path)[1]) as tmp_file:
         tmp_file.write(downloaded_file)

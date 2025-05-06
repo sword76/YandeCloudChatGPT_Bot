@@ -8,10 +8,14 @@ import openai
 import json
 import boto3
 import time
-# import multiprocessing
 import requests
 import base64
 from telebot.types import InputFile
+
+# Temp. For sound file mathadata exctruction
+import mutagen
+
+# For 4096 characters long answer message splitting 
 import itertools
 
 # Import enviroment variables
@@ -109,6 +113,26 @@ def request_balance(message):
     else:
         bot.reply_to(message, 'Произошла ошибка при получении баланса.')
 
+# Message handler for search function
+@bot.message_handler(commands=["search"])
+def process_search_message(message):
+    
+    start_typing(message.chat.id)
+
+    try:
+        prompt = message.text.split("/search")[1].strip()
+        # logger.info(prompt)
+        ai_response = process_text_message(prompt, message.chat.id, is_search = True)
+        # logger.info(ai_response)
+
+    except Exception as e:
+        bot.reply_to(message, f"Произошла ошибка поиска, попробуйте позже! {e}")
+        return
+
+    stop_typing()
+
+    bot.reply_to(message, ai_response, parse_mode="HTML")
+
 # Image generator
 @bot.message_handler(commands=["image"])
 def image(message):
@@ -140,43 +164,56 @@ def image(message):
 @bot.message_handler(commands=["recognition"])
 def recognition(message):
 
-    start_typing(message.chat.id)
-
-    # Check if audifile attached
-    if message.document and message.document.mime_type in ["audio/mpeg", "audio/wav"]:
-        # Getting file info
-        audio_file_info = bot.get_file(message.document.file_id)
-        downloaded_file = bot.download_file(audio_file_info.file_path)
-
-        bot.reply_to(message, "Аудиофайл получен")
-
-        # Getting title and performer of the file
-        title = message.document.title if hasattr(message.document, 'title') else "Без названия"
-        performer = message.document.performer if hasattr(message.document, 'performer') else "Без исполнителя"
-
-        stop_typing()
-
-        # Sending audiofile info
-        bot.reply_to(message, f"Получен аудиофайл: {title} от исполнителя {performer}")
-    else:
-        bot.reply_to(message, "Пожалуйста, приложите аудиофайл к команде /recognition.")
-
-# Message handler for search function
-@bot.message_handler(commands=["search"])
-def process_search_message(message):
+    msg = bot.send_message(message.chat.id, "Отправь аудиофайл (mp3 или wav) для обработки.")
 
     start_typing(message.chat.id)
 
+    bot.register_next_step_handler(msg, process_audio)
+        
+def process_audio(message):
+    # Check if audiofile handlet
+    audio_file = None
+    if message.audio:
+        audio_file = message.audio
+    elif message.document.mime_type in ['audio/mpeg', 'audio/ogg'] or message.document.file_name.lower().endswith(('.mp3', '.ogg')):
+        audio_file = message.document
+
+    if not audio_file:
+        bot.send_message(message.chat_id, "Пожалуйста, отправь файл в формате mp3 или ogg.")
+        return
+    
+    # Download file to tmp folder
+    file_info = bot.get_file(audio_file.file_id)
+    downloaded_file = bot.download_file(file_info.file_path)
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_path)[1]) as tmp_file:
+        tmp_file.write(downloaded_file)
+        tmp_filename = tmp_file.name
+    
+    # Getting file metadata
     try:
-        text = message.text.split("/search")[1].strip()
-        ai_response = process_text_message(text, message.chat.id, image_content = None, is_search = True)
+        audio_file = mutagen.File(tmp_filename)
+        metadata = []
+        if audio_file is not None:
+            length = audio_file.info.length if audio_file.info.length else 'Неизвестно'
+            size = os.path.getsize(tmp_filename)
+            metadata.append(f"Длительность: {length:.2f} сек")
+            metadata.append(f"Размер файла: {size / 1024:.2f} Кб")
+
+            # Если есть другие метаданные
+            if hasattr(audio_file, 'tags') and audio_file.tags:
+                for tag in audio_file.tags:
+                    metadata.append(f"{tag}: {audio_file.tags.get(tag)}")
+        else:
+            metadata.append("Не удалось прочитать метаданные файла.")
+
+        bot.send_message(message.chat.id, "\n".join(metadata))
 
     except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка поиска, попробуйте позже! {e}")
-        return
-    stop_typing()
-
-    bot.reply_to(message, ai_response)
+        bot.send_message(message.chat.id, f"Ошибка обработки файла: {e}")
+    
+    finally:
+        os.unlink(tmp_filename)  # Delete tmp file
 
 # Voice request and voice answer
 @bot.message_handler(func = lambda msg: msg.voice.mime_type == "audio/ogg", content_types=["voice"])
@@ -192,7 +229,7 @@ def voice(message):
             file=("file.ogg", downloaded_file, "audio/ogg"),
             model="whisper-1",
         )
-        ai_response = process_text_message(response.text, message.chat.id, is_search = None)
+        ai_response = process_text_message(response.text, message.chat.id, is_search = False)
         ai_voice_response = client.audio.speech.create(
             input=ai_response,
             voice=OPENAI_VOICE,
@@ -217,7 +254,7 @@ def voice(message):
 # Message handler, text and photo recognition
 @bot.message_handler(func=lambda message: True, content_types=["text", "photo"])
 def echo_message(message):
-    
+
     start_typing(message.chat.id)
 
     try:
@@ -233,7 +270,7 @@ def echo_message(message):
             if text is None or len(text) == 0:
                 text = "Что изображено на картинке?"
 
-        ai_response = process_text_message(text, message.chat.id, image_content, is_search = None)
+        ai_response = process_text_message(text, message.chat.id, image_content, is_search = False)
 
     except Exception as e:
         bot.reply_to(message, f"Произошла ошибка в распознавании картинки, попробуйте позже! {e}")
@@ -247,17 +284,14 @@ def echo_message(message):
     bot.reply_to(message, ai_response, parse_mode="markdown")
 
 # Message processing function
-def process_text_message(text, chat_id, image_content = None, is_search = False) -> str:
-
-    # if is_search is None:
-    #    is_search = False
-
-    logging.debug(f"is_search value: {is_search}")
+def process_text_message(text, chat_id, image_content = None, is_search = None) -> str:
 
     # Condition to use ChatGPT search model
     model = CHATGPT_SEARCH_MODEL if is_search else CHATGPT_MODEL
-    # model = CHATGPT_SEARCH_MODEL
-    
+
+    # logger.info(f"is_search value: {is_search}")
+    # logger.info(f"Обработка сообщение: {text}, cо значение search: {is_search}, Модель: {model}")
+
     max_tokens = None
     web_search_options = None
 
@@ -294,28 +328,31 @@ def process_text_message(text, chat_id, image_content = None, is_search = False)
     else:
         if is_search:
             web_search_options = {
-            "search_context_size": "low",
-            "user_location": {
-                "type": "approximate",
-                "country": "RU",
-                "city": "Moscow",
-                "region": "Moscow"
-            }
+                "search_context_size": "medium",
+                "user_location": {
+                    "type": "approximate",
+                    "approximate": {
+                        "country": "RU",
+                        "city": "",
+                        "region": ""
+                    }
+                }
             }
         
         history.append({"role": "user", "content": text})
 
     try:
         chat_completion = client.chat.completions.create(
-            model=model, web_search_options = web_search_options, messages = history, max_tokens = max_tokens
+            model = model, web_search_options = web_search_options, messages = history, max_tokens = max_tokens
         )
-        
-        logging.debug(f"Chat completion: {chat_completion}")
         
     except Exception as e:
         if type(e).__name__ == "BadRequestError":
+
+            logging.error(f"Caught BadRequestError: {e}") # Find BadRequestError reason
+
             clear_history_for_chat(chat_id)
-            return process_text_message(text, chat_id, is_search = None)
+            return process_text_message(text, chat_id)
         else:
             raise e
 

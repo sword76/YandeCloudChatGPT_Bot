@@ -17,7 +17,8 @@ import mutagen
 import tempfile
 
 # For 4096 characters long answer message splitting 
-import itertools
+from itertools import batched
+import re
 
 # Import enviroment variables
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
@@ -25,14 +26,9 @@ PROXY_API_KEY = os.getenv("PROXY_API_KEY")
 YANDEX_KEY_ID = os.getenv("YANDEX_KEY_ID")
 YANDEX_KEY_SECRET = os.getenv("YANDEX_KEY_SECRET")
 YANDEX_BUCKET = os.getenv("YANDEX_BUCKET")
-# ChatGPT models: o1-preview, o1-mini, gpt-4o, gpt-4o-2024-08-06, gpt-4o-mini, gpt-4o-turbo, gpt-4, gpt-3.5-turbo-0125, gpt-3.5-turbo-1106, gpt-3.5-turbo-0613 и старше, gpt-3.5-turbo-0613 и старше, text-embedding-3-small, text-embedding-3-large, ada v2
-# Google models: gemini-1.0-pro, gemini-1.5-pro, gemini-1.5-pro, gemini-1.5-flash, gemini-1.5-flash
-# Anthropic: claude-3-opus-20240229, claude-3-sonnet-20240229, claude-3-sonnet-20240229, claude-3-5-sonnet-20240620
 CHATGPT_MODEL = os.getenv("CHATGPT_MODEL")
 CHATGPT_SEARCH_MODEL = os.getenv("CHATGPT_SEARCH_MODEL")
-# OpenAI models: DALL-E 2, DALL-E 3, DALL-E 3 HD
 OPENAI_MODEL = os.getenv("OPENAI_MODEL")
-# OpenAI voice models (tts-1, tts-1-hd) and voice (alloy, echo, fable, onyx, nova и shimmer)
 VOICE_MODEL = os.getenv("VOICE_MODEL")
 OPENAI_VOICE = os.getenv("OPENAI_VOICE")
 
@@ -131,8 +127,13 @@ def process_search_message(message):
         return
 
     stop_typing()
-
-    bot.reply_to(message, ai_response, parse_mode="HTML")
+    
+    for msg_batch in batched(ai_response, 4096):
+        text = ''.join(msg_batch)
+        bot.reply_to(message, text, parse_mode="Markdown") 
+        time.sleep(1)
+        
+    # bot.reply_to(message, ai_response, parse_mode="HTML")
 
 # Image generator
 @bot.message_handler(commands=["image"])
@@ -161,7 +162,7 @@ def image(message):
         reply_to_message_id=message.message_id,
     )
 
-# Audio voice recognition
+# Audio file voice recognition
 @bot.message_handler(commands=["recognition"])
 def recognition(message):
 
@@ -169,20 +170,16 @@ def recognition(message):
 
     start_typing(message.chat.id)
 
-    bot.register_next_step_handler(msg, process_audio)
-        
-def process_audio(message):
     # Check if audiofile handlet
-    audio_file = None
-    if message.audio:
-        audio_file = message.audio
-    elif message.document.mime_type in ['audio/mpeg', 'audio/ogg'] or message.document.file_name.lower().endswith(('.mp3', '.ogg')):
-        audio_file = message.document
+    if msg.audio:
+        audio_file = msg.audio
+    elif msg.document.mime_type in ['audio/mpeg', 'audio/ogg'] or msg.document.file_name.lower().endswith(('.mp3', '.ogg')):
+        audio_file = msg.document
 
     if not audio_file:
         bot.send_message(message.chat_id, "Пожалуйста, отправь файл в формате mp3 или ogg.")
         return
-    
+
     # Download file to tmp folder
     file_info = bot.get_file(audio_file.file_id)
     file_path = file_info.file_path
@@ -192,30 +189,28 @@ def process_audio(message):
         tmp_file.write(downloaded_file)
         tmp_filename = tmp_file.name
     
-    # Getting file metadata
+    # Speech recognition
     try:
-        audio_file = mutagen.File(tmp_filename)
-        metadata = []
-        if audio_file is not None:
-            length = audio_file.info.length if audio_file.info.length else 'Неизвестно'
-            size = os.path.getsize(tmp_filename)
-            metadata.append(f"Длительность: {length:.2f} сек")
-            metadata.append(f"Размер файла: {size / 1024:.2f} Кб")
-
-            # Если есть другие метаданные
-            if hasattr(audio_file, 'tags') and audio_file.tags:
-                for tag in audio_file.tags:
-                    metadata.append(f"{tag}: {audio_file.tags.get(tag)}")
-        else:
-            metadata.append("Не удалось прочитать метаданные файла.")
-
-        bot.send_message(message.chat.id, "\n".join(metadata))
+        response = client.audio.transcriptions.create(
+            file=("file.ogg", tmp_filename, "audio/ogg"),
+            model="whisper-1",
+        )
+        ai_response = process_text_message(response.text, message.chat.id, is_search = False)
 
     except Exception as e:
-        bot.send_message(message.chat.id, f"Ошибка обработки файла: {e}")
+        bot.send_message(message.chat.id, f"Ошибка распознавания аудио-файла: {e}")
     
     finally:
         os.unlink(tmp_filename)  # Delete tmp file
+
+    stop_typing()
+
+    for msg_batch in batched(ai_response, 4096):
+        text = ''.join(msg_batch)
+        bot.reply_to(message.chat.id, text, parse_mode="Markdown") 
+        time.sleep(1)
+
+    # bot.register_next_step_handler(msg, process_audio)
 
 # Voice request and voice answer
 @bot.message_handler(func = lambda msg: msg.voice.mime_type == "audio/ogg", content_types=["voice"])
@@ -280,10 +275,12 @@ def echo_message(message):
 
     stop_typing()
 
-    # for msg_batch in itertools.batched(ai_response, 4096):
-    #    bot.reply_to(message, msg_batch, parse_mode="markdown") 
-        
-    bot.reply_to(message, ai_response, parse_mode="markdown")
+    for msg_batch in batched(ai_response, 4096):
+        text = ''.join(msg_batch)
+        bot.reply_to(message, text, parse_mode="Markdown") 
+        time.sleep(1)
+
+#        bot.reply_to(message, ai_response, parse_mode="Markdown")
 
 # Message processing function
 def process_text_message(text, chat_id, image_content = None, is_search = None) -> str:
@@ -381,3 +378,7 @@ def clear_history_for_chat(chat_id):
         )
     except:
         logging.error(f"Failed to clear history for chat_id {chat_id}: {e}")
+
+# Split message on 4096 long and send message
+def split_and_send(message, response, parse_mode = "Markdown", max_length = 4096):
+    pass

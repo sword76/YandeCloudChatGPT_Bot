@@ -165,52 +165,71 @@ def image(message):
 # Audio file voice recognition
 @bot.message_handler(commands=["recognition"])
 def recognition(message):
-
-    msg = bot.send_message(message.chat.id, "Отправь аудиофайл (mp3 или ogg) для обработки.")
-
+    bot.send_message(message.chat.id, "Отправь аудиофайл в формате mp3 или ogg для обработки.")
     start_typing(message.chat.id)
-
-    # Check if audiofile handlet
-    if msg.audio:
-        audio_file = msg.audio
-    elif msg.document.mime_type in ['audio/mpeg', 'audio/ogg'] or msg.document.file_name.lower().endswith(('.mp3', '.ogg')):
-        audio_file = msg.document
-
-    if not audio_file:
-        bot.send_message(message.chat_id, "Пожалуйста, отправь файл в формате mp3 или ogg.")
-        return
-
-    # Download file to tmp folder
-    file_info = bot.get_file(audio_file.file_id)
-    file_path = file_info.file_path
-    downloaded_file = bot.download_file(file_path)
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_path)[1]) as tmp_file:
-        tmp_file.write(downloaded_file)
-        tmp_filename = tmp_file.name
     
-    # Speech recognition
-    try:
-        response = client.audio.transcriptions.create(
-            file=("file.ogg", tmp_filename, "audio/ogg"),
-            model="whisper-1",
-        )
-        ai_response = process_text_message(response.text, message.chat.id, is_search = False)
+    # Wait for adio message or file for recognition
+    def handle_audio(msg):
+        audio_file = None
+        file_mime = None
+        file_ext = None
 
-    except Exception as e:
-        bot.send_message(message.chat.id, f"Ошибка распознавания аудио-файла: {e}")
-    
-    finally:
-        os.unlink(tmp_filename)  # Delete tmp file
+        if msg.voice:
+            audio_file = msg.voice
+            file_mime = 'audio/ogg'
+            file_ext = '.ogg'
+        elif msg.audio:
+            audio_file = msg.audio
+            file_mime = msg.audio.mime_type or 'audio/mpeg'
+            file_ext = os.path.splitext(audio_file.file_name)[1] if audio_file.file_name else '.mp3'
+        elif msg.document:
+            if (msg.document.mime_type in ['audio/mpeg', 'audio/ogg'] or
+                msg.document.file_name.lower().endswith(('.mp3', '.ogg'))):
+                audio_file = msg.document
+                file_mime = msg.document.mime_type or 'application/octet-stream'
+                file_ext = os.path.splitext(msg.document.file_name)[1]
 
-    stop_typing()
+        if not audio_file:
+            bot.send_message(msg.chat.id, "Пожалуйста, отправь аудиофайл в формате mp3 или ogg.")
+            stop_typing(msg.chat.id)
+            bot.unregister_message_handler(handle_audio)
+            return
 
-    for msg_batch in batched(ai_response, 4096):
-        text = ''.join(msg_batch)
-        bot.reply_to(message.chat.id, text, parse_mode="Markdown") 
-        time.sleep(1)
+        try:
+            file_info = bot.get_file(audio_file.file_id)
+            downloaded_file = bot.download_file(file_info.file_path)
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
+                tmp_file.write(downloaded_file)
+                tmp_filename = tmp_file.name
+            
+            with open(tmp_filename, 'rb') as f:
+                recognition = client.audio.transcriptions.create(
+                    file=(os.path.basename(tmp_filename), f, file_mime),
+                    model="whisper-1"
+                )
+            
+            # ai_response = process_text_message(response.text, msg.chat.id, is_search=False)
+            
+        except Exception as e:
+            bot.send_message(msg.chat.id, f"Ошибка распознавания голосового файла: {e}")
+            stop_typing(msg.chat.id)
+            bot.unregister_message_handler(handle_audio)
+            return
 
-    # bot.register_next_step_handler(msg, process_audio)
+        finally:
+            if 'tmp_filename' in locals() and os.path.exists(tmp_filename):
+                os.unlink(tmp_filename)
+        
+        stop_typing()
+
+        for msg_batch in batched(recognition.text, 4096):
+            text = ''.join(msg_batch)
+            bot.reply_to(message, text, parse_mode="Markdown") 
+            time.sleep(1)
+
+    # Register temp audio recognition handler
+    bot.register_next_step_handler(message, handle_audio)
 
 # Voice request and voice answer
 @bot.message_handler(func = lambda msg: msg.voice.mime_type == "audio/ogg", content_types=["voice"])

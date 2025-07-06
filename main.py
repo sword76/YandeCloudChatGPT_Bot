@@ -151,7 +151,7 @@ def image(message):
             prompt=prompt, n=1, size="1024x1024", model=OPENAI_MODEL
         )
     except Exception as e:
-        bot.reply_to(message, f"❌Произошла ошибка в генерации изображения: {e}.")
+        bot.reply_to(message, f"❌ Произошла ошибка в генерации изображения: {e}.")
         return
 
     stop_typing()
@@ -165,7 +165,7 @@ def image(message):
 # Audio file voice recognition
 @bot.message_handler(commands=["recognition"])
 def recognition(message):
-    bot.send_message(message.chat.id, "Отправь аудиофайл в формате mp3, ogg, opus или aac для обработки.")
+    bot.send_message(message.chat.id, "Отправь аудиофайл в формате mp3, ogg, opus, wav или aac для обработки.")
     start_typing(message.chat.id)
     
     def handle_audio(msg):
@@ -195,6 +195,8 @@ def recognition(message):
                         file_ext = '.aac'
                     elif 'ogg' in file_mime:
                         file_ext = '.ogg'
+                    elif 'wav' in file_mime:
+                        file_ext = '.wav'
                     else:
                         file_ext = '.mp3'  # Default file ext
 
@@ -204,8 +206,8 @@ def recognition(message):
                 file_name = (msg.document.file_name or '').lower()
                 
                 # Allowed MIME-types and extensions
-                allowed_mimes = {'audio/mpeg', 'audio/ogg', 'audio/aac', 'audio/opus'}
-                allowed_exts = {'.mp3', '.ogg', '.aac', '.opus'}
+                allowed_mimes = {'audio/mpeg', 'audio/ogg', 'audio/aac', 'audio/opus', 'audio/wav'}
+                allowed_exts = {'.mp3', '.ogg', '.aac', '.opus', '.wav'}
                 
                 # Check allowed file format
                 ext_match = any(file_name.endswith(ext) for ext in allowed_exts)

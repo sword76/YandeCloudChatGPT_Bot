@@ -244,12 +244,10 @@ def recognition(message):
                     model="whisper-1"
                 )
 
-            # Audio recognition processing 
-            # ai_response = process_text_message(response.text, msg.chat.id, is_search=False)
             response = response.text
             
             # Sending respoce
-            for chunk in [response[i:i+4096] for i in range(0, len(ai_response), 4096)]:
+            for chunk in [response[i:i+4096] for i in range(0, len(response), 4096)]:
                 bot.reply_to(msg, chunk, parse_mode="Markdown")
                 time.sleep(1)  # Flood protection
 

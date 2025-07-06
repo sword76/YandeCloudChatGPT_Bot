@@ -108,7 +108,7 @@ def request_balance(message):
         balance = round(response.json()['balance'], 2)
         bot.reply_to(message, f'Ваш текущий баланс на proxyapi.ru: {balance}')
     else:
-        bot.reply_to(message, 'Произошла ошибка при получении баланса.')
+        bot.reply_to(message, '❌ Произошла ошибка при получении баланса.')
 
 # Message handler for search function
 @bot.message_handler(commands=["search"])
@@ -123,7 +123,7 @@ def process_search_message(message):
         # logger.info(ai_response)
 
     except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка поиска, попробуйте позже! {e}")
+        bot.reply_to(message, f"❌ Произошла ошибка поиска: {e}.")
         return
 
     stop_typing()
@@ -150,8 +150,8 @@ def image(message):
         response = client.images.generate(
             prompt=prompt, n=1, size="1024x1024", model=OPENAI_MODEL
         )
-    except:
-        bot.reply_to(message, "Произошла ошибка в генерации изображения, попробуйте позже!")
+    except Exception as e:
+        bot.reply_to(message, f"❌Произошла ошибка в генерации изображения: {e}.")
         return
 
     stop_typing()
@@ -165,70 +165,105 @@ def image(message):
 # Audio file voice recognition
 @bot.message_handler(commands=["recognition"])
 def recognition(message):
-    bot.send_message(message.chat.id, "Отправь аудиофайл в формате mp3 или ogg для обработки.")
+    bot.send_message(message.chat.id, "Отправь аудиофайл в формате mp3, ogg, opus или aac для обработки.")
     start_typing(message.chat.id)
     
-    # Wait for adio message or file for recognition
     def handle_audio(msg):
-        audio_file = None
-        file_mime = None
-        file_ext = None
-
-        if msg.voice:
-            audio_file = msg.voice
-            file_mime = 'audio/ogg'
-            file_ext = '.ogg'
-        elif msg.audio:
-            audio_file = msg.audio
-            file_mime = msg.audio.mime_type or 'audio/mpeg'
-            file_ext = os.path.splitext(audio_file.file_name)[1] if audio_file.file_name else '.mp3'
-        elif msg.document:
-            if (msg.document.mime_type in ['audio/mpeg', 'audio/ogg'] or
-                msg.document.file_name.lower().endswith(('.mp3', '.ogg'))):
-                audio_file = msg.document
-                file_mime = msg.document.mime_type or 'application/octet-stream'
-                file_ext = os.path.splitext(msg.document.file_name)[1]
-
-        if not audio_file:
-            bot.send_message(msg.chat.id, "Пожалуйста, отправь аудиофайл в формате mp3 или ogg.")
-            stop_typing(msg.chat.id)
-            bot.unregister_message_handler(handle_audio)
-            return
-
         try:
+            audio_file = None
+            file_mime = None
+            file_ext = None
+
+            # Handle voice message
+            if msg.voice:
+                audio_file = msg.voice
+                file_mime = 'audio/ogg'
+                file_ext = '.ogg'
+
+            # Hande audio file
+            elif msg.audio:
+                audio_file = msg.audio
+                file_mime = msg.audio.mime_type or 'audio/mpeg'
+                
+                # Set ext according filename or MIME-type
+                if audio_file.file_name:
+                    file_ext = os.path.splitext(audio_file.file_name)[1].lower()
+                else:
+                    if 'opus' in file_mime:
+                        file_ext = '.opus'
+                    elif 'aac' in file_mime:
+                        file_ext = '.aac'
+                    elif 'ogg' in file_mime:
+                        file_ext = '.ogg'
+                    else:
+                        file_ext = '.mp3'  # Default file ext
+
+            # Handdle documents
+            elif msg.document:
+                mime_type = msg.document.mime_type or ''
+                file_name = (msg.document.file_name or '').lower()
+                
+                # Allowed MIME-types and extensions
+                allowed_mimes = {'audio/mpeg', 'audio/ogg', 'audio/aac', 'audio/opus'}
+                allowed_exts = {'.mp3', '.ogg', '.aac', '.opus'}
+                
+                # Check allowed file format
+                ext_match = any(file_name.endswith(ext) for ext in allowed_exts)
+                if mime_type in allowed_mimes or ext_match:
+                    audio_file = msg.document
+                    file_mime = mime_type
+                    
+                    # Set file ext
+                    if file_name:
+                        file_ext = os.path.splitext(file_name)[1]
+                        if file_ext not in allowed_exts:
+                            file_ext = '.mp3'  # Default ext
+                    else:
+                        file_ext = '.mp3'  # Default ext if filename missing
+
+            # check if valid file exist
+            if not audio_file:
+                bot.send_message(msg.chat.id, "❌ Пожалуйста, отправь аудиофайл в формате mp3, ogg, opus или aac.")
+                return
+
+            # Download and handle file 
             file_info = bot.get_file(audio_file.file_id)
             downloaded_file = bot.download_file(file_info.file_path)
-            
-            with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
+
+            # Create tmp file
+            with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp_file:
                 tmp_file.write(downloaded_file)
                 tmp_filename = tmp_file.name
-            
+
+            # Audio recognition
             with open(tmp_filename, 'rb') as f:
-                recognition = client.audio.transcriptions.create(
-                    file=(os.path.basename(tmp_filename), f, file_mime),
+                response = client.audio.transcriptions.create(
+                    file=(f"audio{file_ext}", f, file_mime),
                     model="whisper-1"
                 )
-            
-            # ai_response = process_text_message(response.text, msg.chat.id, is_search=False)
-            
-        except Exception as e:
-            bot.send_message(msg.chat.id, f"Ошибка распознавания голосового файла: {e}")
-            stop_typing(msg.chat.id)
-            bot.unregister_message_handler(handle_audio)
-            return
 
+            # Audio recognition processing 
+            # ai_response = process_text_message(response.text, msg.chat.id, is_search=False)
+            response = response.text
+            
+            # Sending respoce
+            for chunk in [response[i:i+4096] for i in range(0, len(ai_response), 4096)]:
+                bot.reply_to(msg, chunk, parse_mode="Markdown")
+                time.sleep(1)  # Flood protection
+
+        except Exception as e:
+            error_msg = f"⚠️ Ошибка обработки аудио: {str(e)}"
+            bot.send_message(msg.chat.id, error_msg[:4096])
+            # Error logging
+            logger.error(f"Audio processing error: {e}", exc_info=True)
+        
         finally:
+            # Clearing resources
+            stop_typing(msg.chat.id)
             if 'tmp_filename' in locals() and os.path.exists(tmp_filename):
                 os.unlink(tmp_filename)
-        
-        stop_typing()
 
-        for msg_batch in batched(recognition.text, 4096):
-            text = ''.join(msg_batch)
-            bot.reply_to(message, text, parse_mode="Markdown") 
-            time.sleep(1)
-
-    # Register temp audio recognition handler
+    # Handle next step
     bot.register_next_step_handler(message, handle_audio)
 
 # Voice request and voice answer
@@ -255,7 +290,7 @@ def voice(message):
         with open("/tmp/ai_voice_response.ogg", "wb") as f:
             f.write(ai_voice_response.content)
     except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка в генерации голосового ответа, попробуйте позже! {e}")
+        bot.reply_to(message, f"❌ Произошла ошибка в генерации голосового ответа: {e}.")
         return
 
     stop_typing()
@@ -289,7 +324,7 @@ def echo_message(message):
         ai_response = process_text_message(text, message.chat.id, image_content, is_search = False)
 
     except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка в распознавании картинки, попробуйте позже! {e}")
+        bot.reply_to(message, f"❌ Произошла ошибка в распознавании картинки: {e}.")
         return
 
     stop_typing()
@@ -323,7 +358,7 @@ def process_text_message(text, chat_id, image_content = None, is_search = None) 
         )
         history = json.loads(history_object_response["Body"].read())
     except:
-        logging.error(f"Failed to add history log for chat_id {chat_id}: {e}")
+        logging.error(f"❌ Произошла ошибка добавления лога для чата {chat_id}: {e}.")
 
     history_text_only = history.copy()
     history_text_only.append({"role": "user", "content": text})
@@ -396,7 +431,7 @@ def clear_history_for_chat(chat_id):
             Body=json.dumps([]),
         )
     except:
-        logging.error(f"Failed to clear history for chat_id {chat_id}: {e}")
+        logging.error(f"❌ Ошибка очистки истории для чата {chat_id}: {e}.")
 
 # Split message on 4096 long and send message
 def split_and_send(message, response, parse_mode = "Markdown", max_length = 4096):

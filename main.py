@@ -165,7 +165,7 @@ def image(message):
 # Audio file voice recognition
 @bot.message_handler(commands=["recognition"])
 def recognition(message):
-    bot.send_message(message.chat.id, "Отправь аудиофайл в формате mp3, ogg, opus, wav или aac для обработки.")
+    bot.send_message(message.chat.id, "Отправь аудиофайл в формате mp3, ogg, flac, wav или aac для обработки.")
     start_typing(message.chat.id)
     
     def handle_audio(msg):
@@ -189,9 +189,9 @@ def recognition(message):
                 if audio_file.file_name:
                     file_ext = os.path.splitext(audio_file.file_name)[1].lower()
                 else:
-                    if 'opus' in file_mime:
-                        file_ext = '.opus'
-                    elif 'aac' in file_mime:
+                    if 'flac' in file_mime:
+                        file_ext = '.flac'
+                    if 'aac' in file_mime:
                         file_ext = '.aac'
                     elif 'ogg' in file_mime:
                         file_ext = '.ogg'
@@ -206,8 +206,8 @@ def recognition(message):
                 file_name = (msg.document.file_name or '').lower()
                 
                 # Allowed MIME-types and extensions
-                allowed_mimes = {'audio/mpeg', 'audio/ogg', 'audio/aac', 'audio/opus', 'audio/wav'}
-                allowed_exts = {'.mp3', '.ogg', '.aac', '.opus', '.wav'}
+                allowed_mimes = {'audio/mpeg', 'audio/ogg', 'audio/aac', 'audio/flac', 'audio/wav'}
+                allowed_exts = {'.mp3', '.ogg', '.aac', '.flac', '.wav'}
                 
                 # Check allowed file format
                 ext_match = any(file_name.endswith(ext) for ext in allowed_exts)
@@ -225,7 +225,7 @@ def recognition(message):
 
             # check if valid file exist
             if not audio_file:
-                bot.send_message(msg.chat.id, "❌ Пожалуйста, отправь аудиофайл в формате mp3, ogg, opus или aac.")
+                bot.send_message(msg.chat.id, "❌ Пожалуйста, отправь аудиофайл в формате mp3, ogg, flac или aac.")
                 return
 
             # Download and handle file 

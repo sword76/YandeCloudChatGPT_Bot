@@ -365,7 +365,7 @@ def process_text_message(text, chat_id, image_content = None, is_search = None) 
 
     # Image recognition response
     if image_content is not None:
-        model = "gpt-4-vision-preview"
+        model = "gpt-4o-mini"
         max_tokens = 4000
         base64_image_content = base64.b64encode(image_content).decode("utf-8")
         base64_image_content = f"data:image/jpeg;base64,{base64_image_content}"

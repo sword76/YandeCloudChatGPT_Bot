@@ -47,6 +47,7 @@ client = openai.Client(
     base_url="https://api.proxyapi.ru/openai/v1",
 )
 
+
 # Function to safe message logs to the Yandex Object Storage
 def get_s3_client():
     session = boto3.session.Session (
@@ -56,13 +57,14 @@ def get_s3_client():
         service_name="s3", endpoint_url="https://storage.yandexcloud.net"
     )
 
-# Function to show "Typing" message while waiting tha ChatGPT answer
 
+# Function to show "Typing" message while waiting tha ChatGPT answer
 def start_typing(chat_id):
     global is_typing
     is_typing = True
     typing_thread = threading.Thread(target = typing, args = (chat_id,))
     typing_thread.start()
+
 
 def typing(chat_id):
     global is_typing
@@ -72,9 +74,11 @@ def typing(chat_id):
         bot.send_chat_action(chat_id, "typing")
         time.sleep(4)
 
+
 def stop_typing():
     global is_typing
     is_typing = False
+
 
 # Welcome and help messages
 @bot.message_handler(commands=["start"])
@@ -83,16 +87,19 @@ def send_welcome(message):
         message,
         ("Привет! Я твой ChatGPT бот. Задай мне вопрос!"),)
 
+
 @bot.message_handler(commands=["help"])
 def send_welcome(message):
     bot.reply_to(
         message, 
         ("Напиши свой вопрос обычным языком, отправь изображение для распознования или голосовое сообщение для ответа."),)
      
+
 @bot.message_handler(commands=["new"])
 def clear_history(message):
     clear_history_for_chat(message.chat.id)
     bot.reply_to(message, "История чата очищена!")
+
 
 # ProxyAPI balance request
 @bot.message_handler(commands=["balance"])
@@ -109,6 +116,7 @@ def request_balance(message):
         bot.reply_to(message, f'Ваш текущий баланс на proxyapi.ru: {balance}')
     else:
         bot.reply_to(message, '❌ Произошла ошибка при получении баланса.')
+
 
 # Message handler for search function
 @bot.message_handler(commands=["search"])
@@ -134,6 +142,7 @@ def process_search_message(message):
         time.sleep(1)
         
     # bot.reply_to(message, ai_response, parse_mode="HTML")
+
 
 # Image generator
 @bot.message_handler(commands=["image"])
@@ -162,8 +171,9 @@ def image(message):
         reply_to_message_id=message.message_id,
     )
 
+
 # Audio file voice recognition
-@bot.message_handler(commands=["recognition"])
+@bot.message_handler(commands=["transcription"])
 def recognition(message):
     bot.send_message(message.chat.id, "Отправь аудиофайл в формате mp3, ogg, flac, wav или aac для обработки.")
     start_typing(message.chat.id)
@@ -266,6 +276,7 @@ def recognition(message):
     # Handle next step
     bot.register_next_step_handler(message, handle_audio)
 
+
 # Voice request and voice answer
 @bot.message_handler(func = lambda msg: msg.voice.mime_type == "audio/ogg", content_types=["voice"])
 def voice(message):
@@ -302,6 +313,7 @@ def voice(message):
             reply_to_message_id=message.message_id,
         )
 
+
 # Message handler, text and photo recognition
 @bot.message_handler(func=lambda message: True, content_types=["text", "photo"])
 def echo_message(message):
@@ -324,7 +336,7 @@ def echo_message(message):
         ai_response = process_text_message(text, message.chat.id, image_content, is_search = False)
 
     except Exception as e:
-        bot.reply_to(message, f"❌ Произошла ошибка в распознавании картинки: {e}.")
+        bot.reply_to(message, f"❌ Произошла ошибка в обработке запроса: {e}.")
         return
 
     stop_typing()
@@ -335,6 +347,7 @@ def echo_message(message):
         time.sleep(1)
 
 #        bot.reply_to(message, ai_response, parse_mode="Markdown")
+
 
 # Message processing function
 def process_text_message(text, chat_id, image_content = None, is_search = None) -> str:
@@ -365,7 +378,8 @@ def process_text_message(text, chat_id, image_content = None, is_search = None) 
 
     # Image recognition response
     if image_content is not None:
-        model = "gpt-4o-mini"
+        model = "gpt-image-1"
+        # model = OPENAI_MODEL
         max_tokens = 4000
         base64_image_content = base64.b64encode(image_content).decode("utf-8")
         base64_image_content = f"data:image/jpeg;base64,{base64_image_content}"
@@ -396,8 +410,12 @@ def process_text_message(text, chat_id, image_content = None, is_search = None) 
 
     try:
         chat_completion = client.chat.completions.create(
-            model = model, web_search_options = web_search_options, messages = history, max_tokens = max_tokens
+            model = model, 
+            web_search_options = web_search_options, 
+            messages = history,
+            max_tokens = max_tokens
         )
+
         
     except Exception as e:
         if type(e).__name__ == "BadRequestError":

@@ -1,4 +1,4 @@
-#  Copyright (c) S.Chirva 2024
+#  Copyright (c) S.Chirva 2025
 
 import telebot
 import os

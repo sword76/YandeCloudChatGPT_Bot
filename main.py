@@ -412,6 +412,22 @@ def process_text_message(text, chat_id, image_content = None, is_search = None) 
             "model": model,
             "messages": history,
         }
+<<<<<<< HEAD
+=======
+
+        # GPT-5 models require max_completion_tokens instead of max_tokens
+        # and don't support web_search_options in Chat Completions API
+        if model.startswith("gpt-5"):
+            request_params["max_completion_tokens"] = max_tokens if max_tokens else 16384
+        else:
+            # GPT-4.x models use max_tokens and support web_search_options
+            if max_tokens is not None:
+                request_params["max_tokens"] = max_tokens
+            if web_search_options is not None:
+                request_params["web_search_options"] = web_search_options
+
+        chat_completion = client.chat.completions.create(**request_params)
+>>>>>>> 6c400bc9a712624a1e03759d9c60429205d450ba
 
         # GPT-5 models require max_completion_tokens instead of max_tokens
         # and don't support web_search_options in Chat Completions API

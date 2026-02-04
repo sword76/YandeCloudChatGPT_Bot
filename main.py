@@ -11,14 +11,16 @@ import time
 import requests
 import base64
 from telebot.types import InputFile
+from telebot.apihelper import ApiTelegramException
 
 # Temp. For sound file mathadata exctruction
-import mutagen
+# import mutagen
 import tempfile
 
-# For 4096 characters long answer message splitting 
+# For 4096 characters long answer message splitting
 from itertools import batched
-import re
+# import re
+
 
 # Import enviroment variables
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
@@ -138,10 +140,8 @@ def process_search_message(message):
     
     for msg_batch in batched(ai_response, 4096):
         text = ''.join(msg_batch)
-        bot.reply_to(message, text, parse_mode="Markdown") 
+        safe_reply(message, text)
         time.sleep(1)
-        
-    # bot.reply_to(message, ai_response, parse_mode="HTML")
 
 
 # Image generator
@@ -256,9 +256,9 @@ def recognition(message):
 
             response = response.text
             
-            # Sending respoce
+            # Sending response
             for chunk in [response[i:i+4096] for i in range(0, len(response), 4096)]:
-                bot.reply_to(msg, chunk, parse_mode="Markdown")
+                safe_reply(msg, chunk)
                 time.sleep(1)  # Flood protection
 
         except Exception as e:
@@ -343,10 +343,8 @@ def echo_message(message):
 
     for msg_batch in batched(ai_response, 4096):
         text = ''.join(msg_batch)
-        bot.reply_to(message, text, parse_mode="Markdown") 
+        safe_reply(message, text)
         time.sleep(1)
-
-#        bot.reply_to(message, ai_response, parse_mode="Markdown")
 
 
 # Message processing function
@@ -380,7 +378,7 @@ def process_text_message(text, chat_id, image_content = None, is_search = None) 
     if image_content is not None:
         model = "gpt-image-1"
         # model = OPENAI_MODEL
-        max_tokens = 4000
+        max_tokens = 8192
         base64_image_content = base64.b64encode(image_content).decode("utf-8")
         base64_image_content = f"data:image/jpeg;base64,{base64_image_content}"
         history.append(
@@ -409,13 +407,24 @@ def process_text_message(text, chat_id, image_content = None, is_search = None) 
         history.append({"role": "user", "content": text})
 
     try:
-        chat_completion = client.chat.completions.create(
-            model = model, 
-            web_search_options = web_search_options, 
-            messages = history,
-            max_tokens = max_tokens
-        )
+        # Build request parameters dynamically based on model
+        request_params = {
+            "model": model,
+            "messages": history,
+        }
 
+        # GPT-5 models require max_completion_tokens instead of max_tokens
+        # and don't support web_search_options in Chat Completions API
+        if model.startswith("gpt-5"):
+            request_params["max_completion_tokens"] = max_tokens if max_tokens else 16384
+        else:
+            # GPT-4.x models use max_tokens and support web_search_options
+            if max_tokens is not None:
+                request_params["max_tokens"] = max_tokens
+            if web_search_options is not None:
+                request_params["web_search_options"] = web_search_options
+
+        chat_completion = client.chat.completions.create(**request_params)
         
     except Exception as e:
         if type(e).__name__ == "BadRequestError":
@@ -439,6 +448,20 @@ def process_text_message(text, chat_id, image_content = None, is_search = None) 
 
     return ai_response
 
+
+# Safe reply function. If Markdown replu fails, it replies plain text.
+def safe_reply(message, text, parse_mode="Markdown"):
+    """Send message with Markdown, fallback to plain text if parsing fails."""
+    try:
+        bot.reply_to(message, text, parse_mode=parse_mode)
+    except ApiTelegramException as e:
+        if "can't parse entities" in str(e):
+            # Fallback to plain text if Markdown parsing fails
+            bot.reply_to(message, text, parse_mode=None)
+        else:
+            raise
+
+
 # Clear message history function
 def clear_history_for_chat(chat_id):
     try:
@@ -450,7 +473,3 @@ def clear_history_for_chat(chat_id):
         )
     except:
         logging.error(f"❌ Ошибка очистки истории для чата {chat_id}: {e}.")
-
-# Split message on 4096 long and send message
-def split_and_send(message, response, parse_mode = "Markdown", max_length = 4096):
-    pass

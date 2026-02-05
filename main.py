@@ -1,4 +1,4 @@
-#  Copyright (c) S.Chirva 2025
+#  Copyright (c) S.Chirva 2026
 
 import logging
 import telebot

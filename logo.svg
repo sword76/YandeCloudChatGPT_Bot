@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 140" width="260" height="140">
+  <rect width="260" height="140" fill="transparent"/>
+  <g transform="translate(18,16)">
+    <!-- Папка (фоновая), форма с вкладкой в стиле Windows-папки -->
+    <g>
+      <!-- вкладка (tab) -->
+      <rect x="56" y="-2" width="56" height="34" rx="6" fill="#FFB784"/>
+      <!-- основная часть папки -->
+      <rect x="0" y="20" width="132" height="84" rx="12" fill="#FFCC99" stroke="#D36A3E" stroke-width="1"/>
+      <!-- лёгкий внутренний отблеск для объёма -->
+      <path d="M8 28 h116 a6 6 0 0 1 6 6 v2 h-128 v-8 a6 6 0 0 1 6 -6 z" fill="#FFDDB6" opacity="0.45"/>
+    </g>
+
+    <!-- Тень под стопкой документов -->
+    <ellipse cx="56" cy="86" rx="36" ry="9" fill="#000000" opacity="0.06"/>
+
+    <!-- Стопка документов перед папкой (три листа, смещения) -->
+    <g transform="translate(30,20)">
+      <!-- задний лист -->
+      <rect x="6" y="8" width="56" height="72" rx="8" fill="#FFF8F4" stroke="#F0E6E2" stroke-width="0.5"/>
+      <!-- средний лист -->
+      <rect x="10" y="0" width="56" height="72" rx="8" fill="#FFF6F2" stroke="#F0E6E2" stroke-width="0.5"/>
+      <!-- верхний лист с лицом -->
+      <rect x="14" y="-8" width="56" height="72" rx="8" fill="#FFF6F0" stroke="#EFE6E1" stroke-width="0.6"/>
+
+      <!-- на верхнем листе: строчки текста (минималистично) -->
+      <rect x="26" y="8" width="32" height="6" rx="3" fill="#6D4C41" opacity="0.9"/>
+      <rect x="24" y="22" width="28" height="4" rx="2" fill="#6D4C41" opacity="0.7"/>
+
+      <!-- лицо: глаза -->
+      <circle cx="36" cy="40" r="3.5" fill="#6D4C41"/>
+      <circle cx="48" cy="40" r="3.5" fill="#6D4C41"/>
+
+      <!-- улыбка -->
+      <path d="M30 50 Q36 56 44 50" stroke="#6D4C41" stroke-width="2" stroke-linecap="round" fill="none"/>
+    </g>
+
+    <!-- Подпись (опционально, можно убрать) -->
+    <text x="152" y="100" font-family="Inter, Roboto, Arial, sans-serif" font-size="18" fill="#3E2723" font-weight="700">АнонимДок</text>
+  </g>
+</svg>

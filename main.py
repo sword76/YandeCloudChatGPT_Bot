@@ -1,17 +1,21 @@
 #  Copyright (c) S.Chirva 2026
 
+import base64
+import boto3
+
+from google import genai
+from google.genai import types
+
+import json
 import logging
-import telebot
-import threading
 import os
 import openai
-import json
-import boto3
-import time
 import requests
-import base64
+import telebot
 from telebot.types import InputFile
 from telebot.apihelper import ApiTelegramException
+import time
+import threading
 
 # Temp. For sound file mathadata exctruction
 # import mutagen
@@ -49,6 +53,11 @@ client = openai.Client(
     base_url="https://api.proxyapi.ru/openai/v1",
 )
 
+# Redirect request for video generation by Google AI
+gen_client = genai.Client(
+    api_key=PROXY_API_KEY,
+    http_options={"base_url": "https://api.proxyapi.ru/google"}
+)
 
 # Function to safe message logs to the Yandex Object Storage
 def get_s3_client():
@@ -347,6 +356,11 @@ def echo_message(message):
         time.sleep(1)
 
 
+# Message handler for video genertion
+@bot.message_handler(func=lambda message: True, content_types=["video"])
+
+
+
 # Message processing function
 def process_text_message(text, chat_id, image_content = None, is_search = None) -> str:
 
@@ -356,7 +370,7 @@ def process_text_message(text, chat_id, image_content = None, is_search = None) 
     # logger.info(f"is_search value: {is_search}")
     # logger.info(f"Обработка сообщение: {text}, cо значение search: {is_search}, Модель: {model}")
 
-    max_tokens = None
+    max_tokens = 8192
     web_search_options = None
 
     # Read current chat history

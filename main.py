@@ -3,7 +3,7 @@
 import base64
 import boto3
 
-from google import genai
+import google.genai as genai
 from google.genai import types
 
 import json
@@ -37,6 +37,8 @@ CHATGPT_SEARCH_MODEL = os.getenv("CHATGPT_SEARCH_MODEL")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL")
 VOICE_MODEL = os.getenv("VOICE_MODEL")
 OPENAI_VOICE = os.getenv("OPENAI_VOICE")
+VIDEO_MODEL = os.getenv("VIDEO_MODEL")
+
 
 # Variable for typing functions 
 is_typing = False
@@ -53,8 +55,7 @@ client = openai.Client(
     base_url="https://api.proxyapi.ru/openai/v1",
 )
 
-# Redirect request for video generation by Google AI
-gen_client = genai.Client(
+video_client = genai.Client(
     api_key=PROXY_API_KEY,
     http_options={"base_url": "https://api.proxyapi.ru/google"}
 )
@@ -103,7 +104,7 @@ def send_welcome(message):
 def send_welcome(message):
     bot.reply_to(
         message, 
-        ("Напиши свой вопрос обычным языком, отправь изображение для распознования или голосовое сообщение для ответа."),)
+        ("Напиши свой вопрос обычным языком, отправь изображение для распознования, текст для генерации видео и изображения или голосовое сообщение для ответа."),)
      
 
 @bot.message_handler(commands=["new"])
@@ -160,6 +161,7 @@ def image(message):
     start_typing(message.chat.id)
 
     prompt = message.text.split("/image")[1].strip()
+    
     if len(prompt) == 0:
         bot.reply_to(message, "Введите запрос после команды /image")
         return
@@ -323,6 +325,60 @@ def voice(message):
         )
 
 
+# Message handler for text to video genertion
+@bot.message_handler(commands=["video"])
+def process_message_to_video(message):
+
+    start_typing(message.chat.id)
+
+    prompt = message.text.split("/video")[1].strip()
+    
+    if len(prompt) == 0:
+        stop_typing()
+        bot.reply_to(message, "Введите запрос после команды /video")
+        return    
+
+    try:
+        bot.reply_to(message, "⏳ Генерация видео начата, ожидайте...")
+
+        operation = video_client.models.generate_videos(
+            model=VIDEO_MODEL,
+            prompt=prompt,
+        )
+
+        # Poll until done (video generation takes up to 6 minutes)
+        while not operation.done:
+            time.sleep(10)
+            operation = video_client.operations.get(operation)
+
+        # Download the generated video
+        video_uri = operation.response.generated_videos[0].video.uri
+        video_data = requests.get(
+            video_uri,
+            headers={"x-goog-api-key": PROXY_API_KEY},
+        ).content
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp.write(video_data)
+            tmp_path = tmp.name
+
+    except Exception as e:
+        stop_typing()
+        bot.reply_to(message, f"❌ Произошла ошибка в генерации видео: {e}.")
+        return
+
+    stop_typing()
+
+    with open(tmp_path, "rb") as f:
+        bot.send_video(
+            message.chat.id,
+            f,
+            reply_parameters=message.message_id,
+        )
+
+    os.unlink(tmp_path)
+
+
 # Message handler, text and photo recognition
 @bot.message_handler(func=lambda message: True, content_types=["text", "photo"])
 def echo_message(message):
@@ -354,11 +410,6 @@ def echo_message(message):
         text = ''.join(msg_batch)
         safe_reply(message, text)
         time.sleep(1)
-
-
-# Message handler for video genertion
-@bot.message_handler(func=lambda message: True, content_types=["video"])
-
 
 
 # Message processing function
